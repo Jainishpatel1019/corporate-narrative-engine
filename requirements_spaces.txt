@@ -1,0 +1,10 @@
+streamlit
+sentence-transformers
+faiss-cpu
+transformers
+torch
+langchain
+duckdb
+tiktoken
+beautifulsoup4
+rank_bm25
