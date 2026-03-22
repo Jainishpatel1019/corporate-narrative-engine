@@ -1,0 +1,1 @@
+# SignalEdge — Corporate Narrative Intelligence

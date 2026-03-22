@@ -1,56 +1,43 @@
+"""
+src/ingestion/chunker.py — Sliding window text chunker using tiktoken.
+"""
+
+from __future__ import annotations
+
 import tiktoken
-from typing import List, Dict
+
+from src.config import CHUNK_OVERLAP, CHUNK_SIZE
+
 
 class SlidingWindowChunker:
-    def __init__(self, chunk_size: int = 150, overlap: int = 25, model: str = "cl100k_base"):
-        if overlap >= chunk_size:
-            raise ValueError("Overlap cannot be greater than or equal to chunk size.")
-            
-        self.chunk_size = chunk_size
-        self.overlap = overlap
-        self.tokenizer = tiktoken.get_encoding(model)
+    """Split text into overlapping token-based chunks."""
 
-    def chunk(self, text: str) -> List[Dict]:
-        if not text:
+    def __init__(
+        self,
+        chunk_size: int = CHUNK_SIZE,
+        chunk_overlap: int = CHUNK_OVERLAP,
+        encoding_name: str = "cl100k_base",
+    ) -> None:
+        self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
+        self.enc = tiktoken.get_encoding(encoding_name)
+
+    def chunk(self, text: str) -> list[dict]:
+        """Return a list of chunk dicts with 'text' and 'chunk_index' keys."""
+        if not text or not text.strip():
             return []
-            
-        tokens = self.tokenizer.encode(text)
-        
-        if not tokens:
-            return []
-            
-        token_count = len(tokens)
-        
-        # Edge case: text shorter than or equal to chunk_size
-        if token_count <= self.chunk_size:
-            return [{
-                "text": text,
-                "start_token": 0,
-                "end_token": token_count,
-                "chunk_index": 0
-            }]
-            
-        chunks = []
-        step = self.chunk_size - self.overlap
-        chunk_index = 0
-        start = 0
-        
-        while start < token_count:
-            end = min(start + self.chunk_size, token_count)
-            chunk_tokens = tokens[start:end]
-            chunk_text = self.tokenizer.decode(chunk_tokens)
-            
-            chunks.append({
-                "text": chunk_text,
-                "start_token": start,
-                "end_token": end,
-                "chunk_index": chunk_index
-            })
-            
-            chunk_index += 1
-            if end == token_count:
+
+        tokens = self.enc.encode(text)
+        chunks: list[dict] = []
+        step = max(1, self.chunk_size - self.chunk_overlap)
+        idx = 0
+
+        for start in range(0, len(tokens), step):
+            window = tokens[start : start + self.chunk_size]
+            chunk_text = self.enc.decode(window)
+            chunks.append({"text": chunk_text, "chunk_index": idx})
+            idx += 1
+            if start + self.chunk_size >= len(tokens):
                 break
-                
-            start += step
-            
+
         return chunks

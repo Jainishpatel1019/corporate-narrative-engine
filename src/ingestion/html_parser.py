@@ -1,63 +1,64 @@
-import re
-from bs4 import BeautifulSoup
-import logging
-from typing import Dict
+"""
+src/ingestion/html_parser.py — Extract relevant sections from SEC filing HTML.
+"""
 
-logger = logging.getLogger(__name__)
+from __future__ import annotations
+
+import re
+
+from bs4 import BeautifulSoup
+
 
 class SECHTMLParser:
-    def __init__(self):
-        # Use (?im) for case-insensitive and multi-line matching
-        # Lookahead (?= ... ) stops at the next major SEC item or part
-        self.stop_pattern = r"(?:^item\s+[0-9a-z]+(?:[\.\s]|$)|^part\s+[ivx]+(?:[\.\s]|$)|\Z)"
-        
-        self.patterns = {
-            "MD&A": re.compile(
-                r"(?im)^item\s+(?:7|2)\.?\s+management.*?discussion.*?(?=" + self.stop_pattern + r")", 
-                re.DOTALL
-            ),
-            "Risk Factors": re.compile(
-                r"(?im)^item\s+1a\.?\s+risk\s+factors.*?(?=" + self.stop_pattern + r")", 
-                re.DOTALL
-            ),
-            "Forward Looking Statements": re.compile(
-                r"(?im)^(?:cautionary\s+note\s+regarding\s+)?forward[\-\s]looking\s+statements.*?(?=" + self.stop_pattern + r")", 
-                re.DOTALL
-            )
-        }
+    """Extract MD&A, Risk Factors, and other key sections from SEC HTML."""
 
-    def parse(self, html: str) -> Dict[str, str]:
-        results = {
-            "MD&A": "",
-            "Risk Factors": "",
-            "Forward Looking Statements": ""
-        }
-        
-        if not html or not isinstance(html, str) or not html.strip():
-            return results
-            
-        try:
-            soup = BeautifulSoup(html, "html.parser")
-            
-            # Strip all script and style elements
-            for script in soup(["script", "style"]):
-                script.extract()
-                
-            # Get raw text, stripping HTML
-            text = soup.get_text(separator='\n')
-            
-            # Clean up into normalized lines to make regex matching robust
-            lines = [line.strip() for line in text.split('\n')]
-            clean_text = '\n'.join([line for line in lines if line])
-            
-            for section, pattern in self.patterns.items():
-                match = pattern.search(clean_text)
+    SECTION_PATTERNS = {
+        "mda": [
+            r"management.s discussion and analysis",
+            r"item\s*7[\.\s]",
+        ],
+        "risk_factors": [
+            r"risk factors",
+            r"item\s*1a[\.\s]",
+        ],
+        "financial_statements": [
+            r"financial statements",
+            r"item\s*8[\.\s]",
+        ],
+    }
+
+    def parse(self, html: str) -> dict[str, str]:
+        """
+        Return a dict of {section_name: plain_text} extracted from *html*.
+        Falls back to the full stripped text if no sections are found.
+        """
+        if not html or not html.strip():
+            return {}
+
+        soup = BeautifulSoup(html, "html.parser")
+        full_text = soup.get_text(separator=" ", strip=True)
+
+        # Clean up whitespace
+        full_text = re.sub(r"\s+", " ", full_text).strip()
+
+        if len(full_text) < 100:
+            return {"full_text": full_text} if full_text else {}
+
+        sections: dict[str, str] = {}
+        text_lower = full_text.lower()
+
+        for section_name, patterns in self.SECTION_PATTERNS.items():
+            for pattern in patterns:
+                match = re.search(pattern, text_lower)
                 if match:
-                    results[section] = match.group(0).strip()
-                    
-        except Exception as e:
-            logger.error(f"Error parsing HTML: {e}")
-            # Graceful degradation - never raise exception
-            pass
-            
-        return results
+                    start = match.start()
+                    # Grab up to 10,000 chars from section start
+                    snippet = full_text[start : start + 10000]
+                    sections[section_name] = snippet
+                    break
+
+        if not sections:
+            # No recognisable sections — return truncated full text
+            sections["full_text"] = full_text[:15000]
+
+        return sections
